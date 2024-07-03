@@ -31,7 +31,8 @@ from functools import singledispatchmethod
 # -----------------------------------------------------------------------------
 
 import httpx
-from aioexos.jsonrpc import Device as DeviceEXOS
+from aioexos.jsonrpc import Device as DeviceExosJsonRpc
+from aioexos.restconf import Device as DeviceExosRestConf
 
 from netcad.device import Device
 from netcad.checks import CheckCollection, CheckResultsCollection
@@ -72,9 +73,16 @@ class EXOSDeviceUnderTest(AsyncDeviceUnderTest):
 
         super().__init__(device=device)
 
-        self.exos = DeviceEXOS(
+        self.exos_jrpc = DeviceExosJsonRpc(
             host=device.name, auth=g_exos.basic_auth, timeout=g_exos.config.timeout
         )
+        self.exos_restc = DeviceExosRestConf(
+            host=device.name,
+            username=g_exos.scp_creds[0],
+            password=g_exos.scp_creds[1],
+            timeout=g_exos.config.timeout,
+        )
+
         self.system_info: Optional[dict] = None
 
         # inialize the DUT cache mechanism; used exclusvely by the
@@ -126,7 +134,7 @@ class EXOSDeviceUnderTest(AsyncDeviceUnderTest):
         """
         async with self._api_cache_lock:
             if not (has_data := self._api_cache.get(key)):
-                has_data = await self.exos.cli(command, **kwargs)
+                has_data = await self.exos_jrpc.cli(command, **kwargs)
                 self._api_cache[key] = has_data
 
             return has_data
@@ -141,16 +149,15 @@ class EXOSDeviceUnderTest(AsyncDeviceUnderTest):
         """DUT setup process"""
         await super().setup()
 
-        if not await port_check_url(self.exos.base_url):
+        if not await port_check_url(self.exos_jrpc.base_url):
             raise SetupError(
                 f"Unable to connect to EXOS device: {self.device.name}: "
                 "Device offline or EXOS API is not enabled, check config."
             )
 
         try:
-            rsp = await self.exos.cli("show switch", text=True)
-            self.system_info = rsp[0]
-            # TODO: need to parse this into a structured object.
+            await self.exos_restc.login()
+
         except httpx.HTTPError as exc:
             rt_exc = RuntimeError(
                 f"Unable to connect to EXOS device {self.device.name}: {str(exc)}"
@@ -161,7 +168,8 @@ class EXOSDeviceUnderTest(AsyncDeviceUnderTest):
 
     async def teardown(self):
         """DUT tearndown process"""
-        await self.exos.aclose()
+        await self.exos_restc.aclose()
+        await self.exos_jrpc.aclose()
 
     @singledispatchmethod
     async def execute_checks(

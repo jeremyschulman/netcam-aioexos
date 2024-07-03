@@ -13,11 +13,15 @@
 #  limitations under the License.
 
 # -----------------------------------------------------------------------------
+# System Impors
+# -----------------------------------------------------------------------------
+import asyncio
+
+# -----------------------------------------------------------------------------
 # Public Impors
 # -----------------------------------------------------------------------------
-from ttp import ttp
 
-from netcad.checks import CheckResultsCollection
+from netcad.checks import CheckResultsCollection, CheckResult, CheckStatus
 from netcad.feats.topology.checks.check_device_info import (
     DeviceInformationCheckCollection,
     DeviceInformationCheckResult,
@@ -41,11 +45,6 @@ __all__ = ()
 #
 # -----------------------------------------------------------------------------
 
-ttp_template = """
-SysName:          {{hostname}}
-System Type:      {{product_model}}
-"""
-
 
 @EXOSDeviceUnderTest.execute_checks.register  # noqa
 async def exos_check_device_info(
@@ -58,25 +57,51 @@ async def exos_check_device_info(
     """
     dut: EXOSDeviceUnderTest = self
 
-    # extract the hostname and product_model from the text output.  These
-    # commands, while having a JSON-RPC equivalent, simply emit the value in
-    # text anyway.  boo.
+    res = await asyncio.gather(
+        # find the active operating system image version
+        self.exos_restc.get(
+            "/openconfig-platform:components/component=operating_system-1/state"
+        ),
+        self.exos_restc.get(
+            "/openconfig-platform:components/component=operating_system-2/state"
+        ),
+        # get product model
+        self.exos_restc.get(
+            "/openconfig-platform:components/component=linecard-1/state"
+        ),
+        # get hostname
+        self.exos_restc.get("/openconfig-system:system/config"),
+    )
 
-    switch_info_txt = await self.exos.cli("show switch", text=True)
-    parser = ttp(switch_info_txt[0], ttp_template)
-    parser.parse()
-    switch_info = parser.result()[0][0]
+    os1, os2, lc1, system = [next(iter(r.json().values())) for r in res]
+    active_os = next((os for os in (os1, os2) if os["oper-status"] == "ACTIVE"))
+    sw_ver = active_os["software-version"]
+    product_model = lc1["description"]
+    serial_number = lc1["serial-no"]
+    part_number = lc1["part-no"]
+    hostname = system["hostname"]
 
     # store the results.
     check = device_checks.checks[0]
+    has_product_model = product_model
 
-    has_product_model = switch_info["product_model"]
-
-    result = DeviceInformationCheckResult(
-        device=dut.device,
-        check=check,
-        measurement=DeviceInformationCheckResult.Measurement(
-            product_model=has_product_model
+    return [
+        DeviceInformationCheckResult(
+            device=dut.device,
+            check=check,
+            measurement=DeviceInformationCheckResult.Measurement(
+                product_model=has_product_model
+            ),
         ),
-    )
-    return [result]
+        CheckResult(
+            device=dut.device,
+            check=check,
+            status=CheckStatus.INFO,
+            measurement=dict(
+                hostname=hostname,
+                serial_number=serial_number,
+                part_number=part_number,
+                software_version=sw_ver,
+            ),
+        ),
+    ]
