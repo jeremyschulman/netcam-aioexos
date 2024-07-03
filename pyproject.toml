@@ -6,15 +6,16 @@ readme = "README.md"
 authors = ["Jeremy Schulman"]
 
 [tool.poetry.dependencies]
-   python = ">=3.10"
+   python = ">=3.10,<4.0"
    netcad = ">=0.20.0"
    pydantic-env = ">=0.3.0"
    asyncssh = "^2.14.2"
    aio-exos = "^0.4.0"
+   ttp = "^0.9.5"
 
 [tool.poetry.group.dev.dependencies]
-interrogate = "^1.7.0"
-ruff = "^0.5.0"
+   interrogate = "^1.7.0"
+   ruff = "^0.5.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
@@ -26,3 +27,11 @@ build-backend = "poetry.core.masonry.api"
     color = true
     ignore-module = true
     exclude = ["tasks.py", "examples", "build", "venv"]
+
+[tool.ruff]
+    # Set the maximum line length to 132.
+    # line-length = 132
+    lint.ignore = ["E731"]
+
+[tool.ruff.lint.extend-per-file-ignores]
+    "__init__.py" = ["F401", "E402"]

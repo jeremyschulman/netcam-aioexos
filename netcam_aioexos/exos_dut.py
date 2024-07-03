@@ -75,7 +75,7 @@ class EXOSDeviceUnderTest(AsyncDeviceUnderTest):
         self.exos = DeviceEXOS(
             host=device.name, auth=g_exos.basic_auth, timeout=g_exos.config.timeout
         )
-        self.version_info: Optional[dict] = None
+        self.system_info: Optional[dict] = None
 
         # inialize the DUT cache mechanism; used exclusvely by the
         # `api_cache_get` method.
@@ -148,7 +148,7 @@ class EXOSDeviceUnderTest(AsyncDeviceUnderTest):
             )
 
         try:
-            self.version_info = await self.exos.cli("show version")
+            self.system_info = await self.exos.cli("show system")
         except httpx.HTTPError as exc:
             rt_exc = RuntimeError(
                 f"Unable to connect to EXOS device {self.device.name}: {str(exc)}"
