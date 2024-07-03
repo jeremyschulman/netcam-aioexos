@@ -93,6 +93,7 @@ async def exos_check_device_info(
                 product_model=has_product_model
             ),
         ),
+        # add an informational block with the device details.
         CheckResult(
             device=dut.device,
             check=check,
