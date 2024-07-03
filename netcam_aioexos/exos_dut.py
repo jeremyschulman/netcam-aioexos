@@ -148,7 +148,9 @@ class EXOSDeviceUnderTest(AsyncDeviceUnderTest):
             )
 
         try:
-            self.system_info = await self.exos.cli("show system")
+            rsp = await self.exos.cli("show switch", text=True)
+            self.system_info = rsp[0]
+            # TODO: need to parse this into a structured object.
         except httpx.HTTPError as exc:
             rt_exc = RuntimeError(
                 f"Unable to connect to EXOS device {self.device.name}: {str(exc)}"
