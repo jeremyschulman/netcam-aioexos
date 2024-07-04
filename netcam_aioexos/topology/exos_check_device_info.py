@@ -51,9 +51,10 @@ async def exos_check_device_info(
     self, device_checks: DeviceInformationCheckCollection
 ) -> CheckResultsCollection:
     """
-    The check executor to validate the device information.  Presently this
-    function validates the product-model value.  It also captures the results
-    of the 'show version' into a check-inforamation.
+    This function is used to collect device information from the Extreme EXOS.
+    The primary check is the product-model.  Additional information is
+    collected and returned as an informational check. This includes the
+    hostname, serial number, part number, and software version.
     """
     dut: EXOSDeviceUnderTest = self
 
@@ -73,9 +74,16 @@ async def exos_check_device_info(
         self.exos_restc.get("/openconfig-system:system/config"),
     )
 
+    # this bit gets to the actual data of each of the openconfig request
+    # responses. ick.
     os1, os2, lc1, system = [next(iter(r.json().values())) for r in res]
+
+    # find the active software version; which is located in one of the "os"
+    # response values.
+
     active_os = next((os for os in (os1, os2) if os["oper-status"] == "ACTIVE"))
     sw_ver = active_os["software-version"]
+
     product_model = lc1["description"]
     serial_number = lc1["serial-no"]
     part_number = lc1["part-no"]
@@ -86,6 +94,7 @@ async def exos_check_device_info(
     has_product_model = product_model
 
     return [
+        # product model check
         DeviceInformationCheckResult(
             device=dut.device,
             check=check,

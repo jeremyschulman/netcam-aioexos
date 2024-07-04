@@ -55,22 +55,16 @@ async def exos_check_cabling(
     self, testcases: InterfaceCablingCheckCollection
 ) -> CheckResultsCollection:
     """
-    Support the "cabling" tests for Arista EOS devices.  These tests are
+    Support the "cabling" tests for Extreme EXOS devices.  These tests are
     implementeding by examing the LLDP neighborship status.
-
-    This function is imported directly into the EOS DUT class defintion.
 
     Parameters
     ----------
     self: ** DO NOT TYPE HINT **
-        EOS DUT instance
+        EXOS DUT instance
 
     testcases:
         The device specific cabling testcases as build via netcad.
-
-    Yields
-    ------
-    Netcad test-case items.
     """
     dut: EXOSDeviceUnderTest = self
     device = dut.device
