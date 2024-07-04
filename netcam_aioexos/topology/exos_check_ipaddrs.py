@@ -32,7 +32,7 @@ from netcad.feats.topology.checks.check_ipaddrs import (
 )
 
 from netcad.device import Device, DeviceInterface
-from netcad.checks import CheckResultsCollection, CheckStatus
+from netcad.checks import CheckResultsCollection, CheckStatus, CheckResult
 
 # -----------------------------------------------------------------------------
 # Private Imports
@@ -72,10 +72,11 @@ async def exos_test_ipaddrs(
     # specific record entries "ifIpConfig" as other data is mixed into this CLI
     # response.
 
-    cli_rsp = await dut.exos_jrpc.cli("show ipconfig")
+    cli_ipcfg_rsp = await dut.exos_jrpc.cli("show ipconfig")
+    cli_mgmt_rsp = await dut.exos_jrpc.cli("show Mgmt")
+    msrd_mgmt_data = cli_mgmt_rsp[0]["vlanProc"]
 
-    dev_ipcfgs = [cfg for rec in cli_rsp if (cfg := rec.get("ifIpConfig"))]
-
+    dev_ipcfgs = [cfg for rec in cli_ipcfg_rsp if (cfg := rec.get("ifIpConfig"))]
     dev_vlan_ifcfgs = {
         vlan_name: cfg for cfg in dev_ipcfgs if (vlan_name := cfg.get("vlan"))
     }
@@ -86,6 +87,18 @@ async def exos_test_ipaddrs(
     for check in collection.checks:
         if_name = check.check_id()
         if_names.append(if_name)
+
+        # if the OOB management port is expected in the design, then check this
+        # value specifically since there is a bespoke command to get this
+        # information.
+
+        if if_name.casefold() == "mgmt":
+            results.append(
+                await _check_mgmt_interface(
+                    msrd_data=msrd_mgmt_data, device=device, check=check
+                )
+            )
+            continue
 
         # if the IP address does not exist, then report that measurement and
         # move on to the next interface.
@@ -104,6 +117,8 @@ async def exos_test_ipaddrs(
             check=check,
             msrd_data=if_ip_data,
             results=results,
+            # TODO: hardcoding this to True for now; until we find a case where
+            #       the IP is assigned to a physical interface (like mgmt)
             is_vlan=True,
         )
 
@@ -111,15 +126,39 @@ async def exos_test_ipaddrs(
     # conditional is checked by examining the interface IP address mask length
     # against zero.
 
+    msrd_if_name = list(dev_vlan_ifcfgs)
+    if msrd_mgmt_data.get("ipAddress"):
+        msrd_if_name.append("Mgmt")
+
     if collection.exclusive:
         _check_exclusive_list(
             device=device,
             expd_if_names=if_names,
-            msrd_if_names=list(dev_vlan_ifcfgs),
+            msrd_if_names=msrd_if_name,
             results=results,
         )
 
     return results
+
+
+# -----------------------------------------------------------------------------
+
+
+async def _check_mgmt_interface(
+    msrd_data: dict,
+    device: Device,
+    check: IPInterfaceCheck,
+) -> CheckResult:
+    """
+    This function checks the IP assignment on the dedicated managmenet
+    interface ("Mgmt").  There is a bespoke command on EXOS for this purpose.
+    """
+
+    result = IPInterfaceCheckResult(device=device, check=check)
+    msrd = result.measurement
+    msrd.if_ipaddr = f"{msrd_data['ipAddress']}/{msrd_data['maskForDisplay']}"
+    msrd.oper_up = msrd_data["linkState"] == 1
+    return result.measure()
 
 
 # -----------------------------------------------------------------------------
