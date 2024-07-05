@@ -192,8 +192,8 @@ def _check_one_interface(
         return
 
     msrd = result.measurement
-    msrd.model = part_number
-    msrd.type = if_xcvr["mediaType"].split()[0]
+    msrd.model = part_number.strip()
+    msrd.type = if_xcvr["mediaType"].split()[0].strip()
 
     def on_mismatch(_field, _expd, _msrd):
         match _field:

@@ -276,4 +276,3 @@ def _check_one_interface(
 
     results.append(result.measure(on_mismatch=on_mismatch))
     return
-

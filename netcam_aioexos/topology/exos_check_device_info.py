@@ -59,9 +59,7 @@ async def exos_check_device_info(
     dut: EXOSDeviceUnderTest = self
 
     res = await asyncio.gather(
-        self.exos_restc.get(
-            "/openconfig-platform:components"
-        ),
+        self.exos_restc.get("/openconfig-platform:components"),
         # get product model
         self.exos_restc.get(
             "/openconfig-platform:components/component=linecard-1/state"
@@ -77,11 +75,10 @@ async def exos_check_device_info(
     # find the software versions; which is located in one of the
     # "operating_system" response values.
 
-    os_comps = [c for c in comps['component'] if c['name'].startswith("operating_system")]
-    os_versions = {
-        c['state']['id']: c['state']['software-version']
-        for c in os_comps
-    }
+    os_comps = [
+        c for c in comps["component"] if c["name"].startswith("operating_system")
+    ]
+    os_versions = {c["state"]["id"]: c["state"]["software-version"] for c in os_comps}
 
     # pull out other information that we need and want to log for informational
     # purposes.
