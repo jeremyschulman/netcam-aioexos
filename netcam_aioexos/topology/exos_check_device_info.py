@@ -59,30 +59,32 @@ async def exos_check_device_info(
     dut: EXOSDeviceUnderTest = self
 
     res = await asyncio.gather(
-        # find the active operating system image version
         self.exos_restc.get(
-            "/openconfig-platform:components/component=operating_system-1/state"
-        ),
-        self.exos_restc.get(
-            "/openconfig-platform:components/component=operating_system-2/state"
+            "/openconfig-platform:components"
         ),
         # get product model
         self.exos_restc.get(
             "/openconfig-platform:components/component=linecard-1/state"
         ),
-        # get hostname
+        # get hostname information
         self.exos_restc.get("/openconfig-system:system/config"),
     )
 
     # this bit gets to the actual data of each of the openconfig request
     # responses. ick.
-    os1, os2, lc1, system = [next(iter(r.json().values())) for r in res]
+    comps, lc1, system = [next(iter(r.json().values())) for r in res]
 
-    # find the active software version; which is located in one of the "os"
-    # response values.
+    # find the software versions; which is located in one of the
+    # "operating_system" response values.
 
-    active_os = next((os for os in (os1, os2) if os["oper-status"] == "ACTIVE"))
-    sw_ver = active_os["software-version"]
+    os_comps = [c for c in comps['component'] if c['name'].startswith("operating_system")]
+    os_versions = {
+        c['state']['id']: c['state']['software-version']
+        for c in os_comps
+    }
+
+    # pull out other information that we need and want to log for informational
+    # purposes.
 
     product_model = lc1["description"]
     serial_number = lc1["serial-no"]
@@ -111,7 +113,7 @@ async def exos_check_device_info(
                 hostname=hostname,
                 serial_number=serial_number,
                 part_number=part_number,
-                software_version=sw_ver,
+                software_version=os_versions,
             ),
         ),
     ]

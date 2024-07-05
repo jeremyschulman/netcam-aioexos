@@ -277,30 +277,3 @@ def _check_one_interface(
     results.append(result.measure(on_mismatch=on_mismatch))
     return
 
-
-def eos_check_one_svi(
-    device: Device,
-    check: InterfaceCheck,
-    svi_oper_status: dict | None,
-    results: CheckResultsCollection,
-):
-    """
-    Checks the device state for a VLAN SVI interface against the expected
-    values in the design.
-    """
-
-    result = InterfaceCheckResult(device=device, check=check)
-
-    if not svi_oper_status:
-        result.measurement = None
-
-    elif not (svi_oper_status or "Cpu" not in svi_oper_status["interfaces"]):
-        result.measurement = None
-
-    else:
-        msrd = result.measurement
-        msrd.used = True
-        msrd.desc = check.expected_results.desc
-        msrd.oper_up = svi_oper_status["status"] == "active"
-
-    results.append(result.measure())
