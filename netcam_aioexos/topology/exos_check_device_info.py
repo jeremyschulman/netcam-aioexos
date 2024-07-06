@@ -13,11 +13,15 @@
 #  limitations under the License.
 
 # -----------------------------------------------------------------------------
+# System Impors
+# -----------------------------------------------------------------------------
+import asyncio
+
+# -----------------------------------------------------------------------------
 # Public Impors
 # -----------------------------------------------------------------------------
-from ttp import ttp
 
-from netcad.checks import CheckResultsCollection
+from netcad.checks import CheckResultsCollection, CheckResult, CheckStatus
 from netcad.feats.topology.checks.check_device_info import (
     DeviceInformationCheckCollection,
     DeviceInformationCheckResult,
@@ -41,42 +45,72 @@ __all__ = ()
 #
 # -----------------------------------------------------------------------------
 
-ttp_template = """
-SysName:          {{hostname}}
-System Type:      {{product_model}}
-"""
-
 
 @EXOSDeviceUnderTest.execute_checks.register  # noqa
 async def exos_check_device_info(
     self, device_checks: DeviceInformationCheckCollection
 ) -> CheckResultsCollection:
     """
-    The check executor to validate the device information.  Presently this
-    function validates the product-model value.  It also captures the results
-    of the 'show version' into a check-inforamation.
+    This function is used to collect device information from the Extreme EXOS.
+    The primary check is the product-model.  Additional information is
+    collected and returned as an informational check. This includes the
+    hostname, serial number, part number, and software version.
     """
     dut: EXOSDeviceUnderTest = self
 
-    # extract the hostname and product_model from the text output.  These
-    # commands, while having a JSON-RPC equivalent, simply emit the value in
-    # text anyway.  boo.
+    res = await asyncio.gather(
+        self.exos_restc.get("/openconfig-platform:components"),
+        # get product model
+        self.exos_restc.get(
+            "/openconfig-platform:components/component=linecard-1/state"
+        ),
+        # get hostname information
+        self.exos_restc.get("/openconfig-system:system/config"),
+    )
 
-    switch_info_txt = await self.exos.cli("show switch", text=True)
-    parser = ttp(switch_info_txt[0], ttp_template)
-    parser.parse()
-    switch_info = parser.result()[0][0]
+    # this bit gets to the actual data of each of the openconfig request
+    # responses. ick.
+    comps, lc1, system = [next(iter(r.json().values())) for r in res]
+
+    # find the software versions; which is located in one of the
+    # "operating_system" response values.
+
+    os_comps = [
+        c for c in comps["component"] if c["name"].startswith("operating_system")
+    ]
+    os_versions = {c["state"]["id"]: c["state"]["software-version"] for c in os_comps}
+
+    # pull out other information that we need and want to log for informational
+    # purposes.
+
+    product_model = lc1["description"]
+    serial_number = lc1["serial-no"]
+    part_number = lc1["part-no"]
+    hostname = system["hostname"]
 
     # store the results.
     check = device_checks.checks[0]
+    has_product_model = product_model
 
-    has_product_model = switch_info["product_model"]
-
-    result = DeviceInformationCheckResult(
-        device=dut.device,
-        check=check,
-        measurement=DeviceInformationCheckResult.Measurement(
-            product_model=has_product_model
+    return [
+        # product model check
+        DeviceInformationCheckResult(
+            device=dut.device,
+            check=check,
+            measurement=DeviceInformationCheckResult.Measurement(
+                product_model=has_product_model
+            ),
         ),
-    )
-    return [result]
+        # add an informational block with the device details.
+        CheckResult(
+            device=dut.device,
+            check=check,
+            status=CheckStatus.INFO,
+            measurement=dict(
+                hostname=hostname,
+                serial_number=serial_number,
+                part_number=part_number,
+                software_version=os_versions,
+            ),
+        ),
+    ]
