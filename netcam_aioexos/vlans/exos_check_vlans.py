@@ -32,23 +32,19 @@ from netcad.feats.vlans.checks.check_vlans import (
     VlanExclusiveListCheckResult,
 )
 
-from netcad.feats.vlans import VlanDesignServiceConfig
-
 # -----------------------------------------------------------------------------
 # Private Imports
 # -----------------------------------------------------------------------------
 
-from netcam_aioeos.eos_dut import EOSDeviceUnderTest
+from ..exos_dut import EXOSDeviceUnderTest
 
 
 # -----------------------------------------------------------------------------
 # Exports
 # -----------------------------------------------------------------------------
 
-__all__ = ["eos_check_vlans", "eos_check_one_vlan"]
 
-
-@EOSDeviceUnderTest.execute_checks.register  # noqa
+@EXOSDeviceUnderTest.execute_checks.register  # noqa
 async def eos_check_vlans(
     self, vlan_checks: VlanCheckCollection
 ) -> CheckResultsCollection:
@@ -60,7 +56,7 @@ async def eos_check_vlans(
     is not configured with any unexpected VLANs.
     """
 
-    dut: EOSDeviceUnderTest = self
+    dut: EXOSDeviceUnderTest = self
     device = dut.device
     results = list()
 
@@ -68,31 +64,17 @@ async def eos_check_vlans(
     # are "down" will not show up in the operational state. But the configured
     # state does not include the Cpu/SVI, so need that too.
 
-    cli_vlan_cfg_resp = await dut.eapi.cli("show vlan configured-ports")
-    cli_vlan_resp = await dut.eapi.cli("show vlan")
-
-    # vlan data is a dictionary, key is the VLAN ID in a string form. need to
-    # merge the contents of the cfg response.  The 'interfaces' key is a
-    # dictionary, so we will do an update; so no need to worry about duplicate
-    # key handling.
-
-    dev_vlans_info = cli_vlan_resp["vlans"]
-    dev_vlans_cfg_info = cli_vlan_cfg_resp["vlans"]
-
-    ds_config = VlanDesignServiceConfig.parse_obj(vlan_checks.config)
-    if not ds_config.check_vlan1:
-        dev_vlans_info.pop("1")
-        dev_vlans_cfg_info.pop("1")
-
-    msrd_active_vlan_ids = {
-        int(vlan_id)
-        for vlan_id, vlan_st in dev_vlans_info.items()
-        if vlan_st["status"] == "active"
-    }
-
-    for vlan_id, vlan_data in dev_vlans_cfg_info.items():
-        cfg_interfaces = dev_vlans_cfg_info[vlan_id]["interfaces"]
-        dev_vlans_info[vlan_id]["interfaces"].update(cfg_interfaces)
+    cli_vlan_resp = await dut.exos_jrpc.cli("show vlan")
+    vlan_data_map = dict()
+    for rec in cli_vlan_resp:
+        vlan_info = rec["vlanProc"]
+        vlan_id = vlan_info["tag"]
+        vlan_data_map[vlan_id] = dict(
+            vlan_id=vlan_info["tag"],
+            name=vlan_info["name1"],
+            admin_up=vlan_info["adminState"] == 1,
+            active_ports=vlan_info["activePorts"],
+        )
 
     # keep track of the set of expectd VLAN-IDs (ints) should we need them for
     # the exclusivity check.
@@ -104,30 +86,31 @@ async def eos_check_vlans(
 
         # The check ID is the VLAN ID in string form.
 
-        vlan_id = check.check_id()
+        vlan_id = int(check.check_id())
         expd_vlan_ids.add(vlan_id)
 
         # If the VLAN data is missing from the device, then we are done.
 
-        if not (vlan_status := dev_vlans_info.get(vlan_id)):
+        if not (vlan_status := vlan_data_map.get(vlan_id)):
             result.measurement = None
             results.append(result.measure())
             continue
 
-        eos_check_one_vlan(
+        await _check_one_vlan(
+            dut,
             exclusive=vlan_checks.exclusive,
             vlan_status=vlan_status,
             result=result,
             results=results,
         )
 
-    if vlan_checks.exclusive:
-        _check_exclusive(
-            device=device,
-            expd_vlan_ids=expd_vlan_ids,
-            msrd_vlan_ids=msrd_active_vlan_ids,
-            results=results,
-        )
+    # if vlan_checks.exclusive:
+    #     _check_exclusive(
+    #         device=device,
+    #         expd_vlan_ids=expd_vlan_ids,
+    #         msrd_vlan_ids=msrd_active_vlan_ids,
+    #         results=results,
+    #     )
 
     return results
 
@@ -159,7 +142,8 @@ def _check_exclusive(
     results.append(result.measure())
 
 
-def eos_check_one_vlan(
+async def _check_one_vlan(
+    dut: EXOSDeviceUnderTest,
     exclusive: bool,
     result: VlanCheckResult,
     vlan_status: dict,
@@ -172,35 +156,34 @@ def eos_check_one_vlan(
     check = result.check
     msrd = result.measurement
 
-    vlan_id = check.check_id()
+    vlan_details = await dut.exos_jrpc.cli(f"show vlan {vlan_status['name']}")
+    ports = list()
+    for rec in vlan_details:
+        if not (vlan_rec := rec.get("vlanProc")):
+            continue
 
-    msrd.oper_up = vlan_status["status"] == "active"
+        if (port := vlan_rec["port"]).startswith("invalid"):
+            continue
+
+        ports.append(port)
+
+    msrd.oper_up = bool(vlan_status["active_ports"])
     msrd.name = vlan_status["name"]
 
-    # -------------------------------------------------------------------------
-    # check the VLAN interface membership list.
-    # -------------------------------------------------------------------------
-
-    # Map the EOS reported interfaces list into a set for comparitive
-    # processing. Do not include any "peer" interfaces; these represent MLAG
-    # information. If the VLAN includes a reference to "Cpu", the map that to
-    # the "interface Vlan<X>" name.
-
-    msrd.interfaces = [
-        if_name if if_name != "Cpu" else f"Vlan{vlan_id}"
-        for if_name in vlan_status["interfaces"]
-        if not if_name.startswith("Peer")
-    ]
-
+    msrd.interfaces = ports
     msrd_ifs_set = set(msrd.interfaces)
     expd_ifs_set = set(check.expected_results.interfaces)
 
     if exclusive:
         if missing_interfaces := expd_ifs_set - msrd_ifs_set:
-            result.logs.FAIL("interfaces", dict(missing=list(missing_interfaces)))
+            result.logs.log(
+                CheckStatus.FAIL, "interfaces", dict(missing=list(missing_interfaces))
+            )
 
         if extra_interfaces := msrd_ifs_set - expd_ifs_set:
-            result.logs.FAIL("interfaces", dict(extra=list(extra_interfaces)))
+            result.logs.log(
+                CheckStatus.FAIL, "interfaces", dict(extra=list(extra_interfaces))
+            )
 
     def on_mismatch(_field, _expd, _msrd):
         if _field == "name":
@@ -211,7 +194,10 @@ def eos_check_one_vlan(
             if not _expd:
                 return CheckStatus.PASS
 
-            result.logs.WARN(_field, dict(expected=_expd, measured=_msrd))
+            result.logs.log(
+                CheckStatus.WARN, _field, dict(expected=_expd, measured=_msrd)
+            )
+
             return CheckStatus.PASS
 
         if _field == "interfaces":

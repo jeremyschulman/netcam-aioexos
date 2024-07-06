@@ -196,7 +196,9 @@ def _check_trunk_switchport(
     if expd.native_vlan:
         expd.native_vlan = expd.native_vlan.vlan_id
 
-    expd.trunk_allowed_vlans = [v.vlan_id for v in expd.trunk_allowed_vlans]
-    msrd.trunk_allowed_vlans = msrd_status["tagged"]
+    expd.trunk_allowed_vlans = sorted(
+        set([v.vlan_id for v in expd.trunk_allowed_vlans])
+    )
+    msrd.trunk_allowed_vlans = sorted(set(msrd_status["tagged"]))
 
     results.append(result.measure())

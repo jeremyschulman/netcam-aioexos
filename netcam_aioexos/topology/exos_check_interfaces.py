@@ -136,6 +136,15 @@ async def exos_check_interfaces(
     for check in collection.checks:
         if_name = check.check_id()
 
+        if if_name.startswith("lag"):
+            await _check_one_lag_interface(
+                dut,
+                device=device,
+                check=check,
+                results=results,
+            )
+            continue
+
         _check_one_interface(
             device=device,
             check=check,
@@ -187,11 +196,13 @@ class EXosInterfaceMeasurement(InterfaceCheckMeasurement):
     @classmethod
     def from_cli(cls, if_data: dict):
         """returns an EOS specific measurement mapping the CLI object fields"""
-        desc = if_data.get("displayString", "") or ""
+        desc = (
+            if_data.get("descriptionString") or if_data.get("displayString", "") or ""
+        )
 
         return cls(
             # a port is used if admin enabled or there is a description
-            used=if_data["adminState"] == 1 or bool(desc),
+            used=if_data["adminState"] == 1,
             # a port is Up if the linkState is 1 or there is an IP address (SVI)
             oper_up=if_data["linkState"] == 1 or if_data.get("ipStatus", 0),
             desc=desc,
@@ -226,6 +237,10 @@ def _check_one_interface(
 
     measurement = EXosInterfaceMeasurement.from_cli(if_msrd)
     match measurement.speed:
+        case 2:
+            measurement.speed = 100
+        case 3:
+            measurement.speed = 1_000
         case 4:
             measurement.speed = 10_000
         case _:
@@ -275,4 +290,25 @@ def _check_one_interface(
             return CheckStatus.SKIP
 
     results.append(result.measure(on_mismatch=on_mismatch))
+    return
+
+
+async def _check_one_lag_interface(
+    dut: EXOSDeviceUnderTest,
+    device: Device,
+    check: InterfaceCheck,
+    results: CheckResultsCollection,
+):
+    if_name = check.check_id()
+    lag_id = if_name.split("lag")[-1]
+
+    cli_rsp = await dut.exos_jrpc.cli(f"show lacp lag {lag_id}")
+
+    result = InterfaceCheckResult(device=device, check=check)
+    lacp_cfg = cli_rsp[0]["lacpLagCfg"]
+    msrd = result.measurement
+    msrd.oper_up = lacp_cfg["up"] == 1
+    msrd.used = lacp_cfg["enable"] == 1
+    results.append(result.measure())
+
     return
