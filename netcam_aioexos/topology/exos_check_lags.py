@@ -89,7 +89,7 @@ async def exos_check_lags(
             for rec in lacp_member_info
             if (port_cfg := rec.get("lagMemberPortCfg"))
         ]
-        if_name = "lag" + lacp_port
+        if_name = "lag" + str(lacp_port)
         lacp_by_group[if_name]["lacp"] = lacp_member_info
         lacp_by_group[if_name]["interfaces"] = lacp_port_cfg
 
@@ -123,7 +123,7 @@ def _check_one_lag(
     """
 
     po_interfaces = lag_status["interfaces"]
-    po_if_names = [if_data["port_number"] for if_data in po_interfaces]
+    po_if_names = [str(if_data["port_number"]) for if_data in po_interfaces]
 
     result = LagCheckResult(device=device, check=check)
     msrd = result.measurement

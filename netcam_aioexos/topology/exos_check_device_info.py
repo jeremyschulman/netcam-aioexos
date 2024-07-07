@@ -13,14 +13,10 @@
 #  limitations under the License.
 
 # -----------------------------------------------------------------------------
-# System Impors
-# -----------------------------------------------------------------------------
-import asyncio
-
-# -----------------------------------------------------------------------------
 # Public Impors
 # -----------------------------------------------------------------------------
 
+from ttp import ttp
 from netcad.checks import CheckResultsCollection, CheckResult, CheckStatus
 from netcad.feats.topology.checks.check_device_info import (
     DeviceInformationCheckCollection,
@@ -37,13 +33,27 @@ from netcam_aioexos.exos_dut import EXOSDeviceUnderTest
 # Exports (None)
 # -----------------------------------------------------------------------------
 
-__all__ = ()
-
 # -----------------------------------------------------------------------------
 #
 #                                 CODE BEGINS
 #
 # -----------------------------------------------------------------------------
+
+
+show_version_template = """
+<group name="sw_ver_switch">
+Switch          : {{ ignore(".*") }} IMG: {{ sw_ver }}
+</group>
+<group name="sw_ver_stack">
+Slot-{{ slot_id }} : {{ ignore(".*") }} IMG: {{ sw_ver }}
+</group>
+"""
+# SysName:          {{ hostname }}
+
+show_switch_template = """
+SysName:          {{ hostname }}
+System Type:      {{ product_model | _line_ }}
+"""
 
 
 @EXOSDeviceUnderTest.execute_checks.register  # noqa
@@ -58,35 +68,26 @@ async def exos_check_device_info(
     """
     dut: EXOSDeviceUnderTest = self
 
-    res = await asyncio.gather(
-        self.exos_restc.get("/openconfig-platform:components"),
-        # get product model
-        self.exos_restc.get(
-            "/openconfig-platform:components/component=linecard-1/state"
-        ),
-        # get hostname information
-        self.exos_restc.get("/openconfig-system:system/config"),
-    )
+    # -------------------------------------------------------------------------
+    # get the software version
+    # -------------------------------------------------------------------------
 
-    # this bit gets to the actual data of each of the openconfig request
-    # responses. ick.
-    comps, lc1, system = [next(iter(r.json().values())) for r in res]
+    cli_sh_ver = await dut.exos_jrpc.cli("show version", text=True)
+    sh_ver_ttp = ttp(data=cli_sh_ver[0], template=show_version_template)
+    sh_ver_ttp.parse()
+    sh_ver_data = sh_ver_ttp.result()[0][0]
+    sh_ver_data = sh_ver_data.get("sw_ver_stack") or sh_ver_data.get("sw_ver_switch")
 
-    # find the software versions; which is located in one of the
-    # "operating_system" response values.
+    # -------------------------------------------------------------------------
+    # get the switch information
+    # -------------------------------------------------------------------------
 
-    os_comps = [
-        c for c in comps["component"] if c["name"].startswith("operating_system")
-    ]
-    os_versions = {c["state"]["id"]: c["state"]["software-version"] for c in os_comps}
-
-    # pull out other information that we need and want to log for informational
-    # purposes.
-
-    product_model = lc1["description"]
-    serial_number = lc1["serial-no"]
-    part_number = lc1["part-no"]
-    hostname = system["hostname"]
+    cli_sh_switch = await dut.exos_jrpc.cli("show switch", text=True)
+    sh_sw_ttp = ttp(data=cli_sh_switch[0], template=show_switch_template)
+    sh_sw_ttp.parse()
+    sh_sw_data = sh_sw_ttp.result()[0][0]
+    product_model = sh_sw_data["product_model"]
+    hostname = sh_sw_data["hostname"]
 
     # store the results.
     check = device_checks.checks[0]
@@ -108,9 +109,7 @@ async def exos_check_device_info(
             status=CheckStatus.INFO,
             measurement=dict(
                 hostname=hostname,
-                serial_number=serial_number,
-                part_number=part_number,
-                software_version=os_versions,
+                software_version=sh_ver_data,
             ),
         ),
     ]
