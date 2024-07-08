@@ -162,7 +162,7 @@ async def _check_one_vlan(
         if not (vlan_rec := rec.get("vlanProc")):
             continue
 
-        if (port := vlan_rec["port"]).startswith("invalid"):
+        if (port := str(vlan_rec["port"])).startswith("invalid"):
             continue
 
         ports.append(port)

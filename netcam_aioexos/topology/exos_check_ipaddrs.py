@@ -76,9 +76,14 @@ async def exos_test_ipaddrs(
     cli_mgmt_rsp = await dut.exos_jrpc.cli("show Mgmt")
     msrd_mgmt_data = cli_mgmt_rsp[0]["vlanProc"]
 
-    dev_ipcfgs = [cfg for rec in cli_ipcfg_rsp if (cfg := rec.get("ifIpConfig"))]
+    dev_ipcfgs = [
+        cfg for rec in cli_ipcfg_rsp
+        if (cfg := rec.get("ifIpConfig")) and cfg['ipAddress'] != '0.0.0.0'
+    ]
+
     dev_vlan_ifcfgs = {
-        vlan_name: cfg for cfg in dev_ipcfgs if (vlan_name := cfg.get("vlan"))
+        vlan_name: cfg for cfg in dev_ipcfgs
+        if (vlan_name := cfg.get("vlan"))
     }
 
     results = list()
@@ -127,7 +132,7 @@ async def exos_test_ipaddrs(
     # against zero.
 
     msrd_if_name = list(dev_vlan_ifcfgs)
-    if msrd_mgmt_data.get("ipAddress"):
+    if msrd_mgmt_data.get("ipAddress") != '0.0.0.0':
         msrd_if_name.append("Mgmt")
 
     if collection.exclusive:

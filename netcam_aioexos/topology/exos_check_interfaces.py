@@ -11,8 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
-
-
+import asyncio
 # -----------------------------------------------------------------------------
 # System Imports
 # -----------------------------------------------------------------------------
@@ -81,10 +80,25 @@ async def exos_check_interfaces(
 
     # -------------------------------------------------------------------------
     # read the ports data from EXOS to get information about the front panel
-    # ports
+    # ports.  Note that we've discovered that the "show ports" does not always
+    # result in all the ports.  So we use "show port information" to get the
+    # complete list of all ports, and then find any missing ports.
     # -------------------------------------------------------------------------
 
+    cli_sh_ports_info = await dut.exos_jrpc.cli("show ports information")
     cli_sh_ports = await dut.exos_jrpc.cli("show ports")
+
+    ports_info_found = set(str(if_data['port']) for rec in cli_sh_ports_info
+                           if (if_data := rec.get("show_ports_info")))
+
+    ports_data_found = set(str(if_data['port']) for rec in cli_sh_ports
+                            if (if_data := rec.get("show_ports_info_detail")))
+
+    if missing_interfaces := ports_info_found - ports_data_found:
+        for if_name in missing_interfaces:
+            cli_sh_port = await dut.exos_jrpc.cli(f"show ports {if_name}")
+            cli_sh_ports.extend(cli_sh_port)
+
     dev_if_msrds = dict()
     for if_rec in cli_sh_ports:
         if not (if_msrd_data := if_rec.get("show_ports_info_detail")):
@@ -118,6 +132,40 @@ async def exos_check_interfaces(
         dev_if_msrds[if_name] = vlan_msrd_data
 
     # -------------------------------------------------------------------------
+    # Check each interface for health checks
+    # -------------------------------------------------------------------------
+
+    for check in collection.checks:
+        if_name = check.check_id()
+
+        if if_name == "Mgmt" and if_name not in dev_if_msrds:
+            await _check_mgmt_interface(
+                dut,
+                device=device,
+                check=check,
+                results=results,
+            )
+            dev_if_msrds[if_name] = True
+            continue
+
+        if if_name.startswith("lag"):
+            await _check_one_lag_interface(
+                dut,
+                device=device,
+                check=check,
+                results=results,
+            )
+            dev_if_msrds[if_name] = True
+            continue
+
+        _check_one_interface(
+            device=device,
+            check=check,
+            if_msrd=dev_if_msrds.get(if_name),
+            results=results,
+        )
+
+    # -------------------------------------------------------------------------
     # Check for the exclusive set of interfaces expected vs actual.
     # -------------------------------------------------------------------------
 
@@ -129,28 +177,6 @@ async def exos_check_interfaces(
             results=results,
         )
 
-    # -------------------------------------------------------------------------
-    # Check each interface for health checks
-    # -------------------------------------------------------------------------
-
-    for check in collection.checks:
-        if_name = check.check_id()
-
-        if if_name.startswith("lag"):
-            await _check_one_lag_interface(
-                dut,
-                device=device,
-                check=check,
-                results=results,
-            )
-            continue
-
-        _check_one_interface(
-            device=device,
-            check=check,
-            if_msrd=dev_if_msrds.get(if_name),
-            results=results,
-        )
 
     return results
 
@@ -172,7 +198,6 @@ def _check_exclusive_interfaces_list(
     This check validates the exclusive list of interfaces found on the device
     against the expected list in the design.
     """
-
     def sort_key(i):
         return DeviceInterface(i, interfaces=device.interfaces)
 
@@ -237,6 +262,8 @@ def _check_one_interface(
 
     measurement = EXosInterfaceMeasurement.from_cli(if_msrd)
     match measurement.speed:
+        case 1:
+            measurement.speed = 10
         case 2:
             measurement.speed = 100
         case 3:
@@ -311,4 +338,19 @@ async def _check_one_lag_interface(
     msrd.used = lacp_cfg["enable"] == 1
     results.append(result.measure())
 
+    return
+
+async def _check_mgmt_interface(
+    dut: EXOSDeviceUnderTest,
+    device: Device,
+    check: InterfaceCheck,
+    results: CheckResultsCollection,
+):
+    cli_rsp = await dut.exos_jrpc.cli(f"show mgmt")
+    result = InterfaceCheckResult(device=device, check=check)
+    mgmt_data = cli_rsp[0]["vlanProc"]
+    msrd = result.measurement
+    msrd.oper_up = mgmt_data["linkState"] == 1
+    msrd.used = mgmt_data["adminState"] == 1
+    results.append(result.measure())
     return

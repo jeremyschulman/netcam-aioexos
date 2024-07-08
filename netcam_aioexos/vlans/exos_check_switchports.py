@@ -128,7 +128,6 @@ async def exos_check_switchports(
             continue
 
         result = SwitchportCheckResult(device=device, check=check)
-
         expd_status = cast(SwitchportCheck.ExpectSwitchport, check.expected_results)
 
         # if the interface from the design does not exist on the device, then
@@ -143,6 +142,7 @@ async def exos_check_switchports(
         # mode check.  if there is a mismatch, then fail now.
 
         msrd_mode = "trunk" if bool(msrd_port["tagged"]) else "access"
+
         if expd_status.switchport_mode != msrd_mode:
             result.measurement.switchport_mode = msrd_mode
             results.append(result.measure())
@@ -166,7 +166,6 @@ def _check_access_switchport(
     This function validates that the access port is reporting as expected.
     This primary check here is ensuring the access VLAN-ID matches.
     """
-
     msrd = result.measurement = SwitchportCheckResult.MeasuredAccess()
     msrd.switchport_mode = "access"
 
