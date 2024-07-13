@@ -17,6 +17,8 @@
 # -----------------------------------------------------------------------------
 
 from typing import Set
+from itertools import chain
+from collections import defaultdict
 
 # -----------------------------------------------------------------------------
 # Public Imports
@@ -60,9 +62,9 @@ async def eos_check_vlans(
     device = dut.device
     results = list()
 
-    # need the configured state, not the optional state since interfaces that
-    # are "down" will not show up in the operational state. But the configured
-    # state does not include the Cpu/SVI, so need that too.
+    # -------------------------------------------------------------------------
+    # read the active vlan information and produce a map by VLAN-ID
+    # -------------------------------------------------------------------------
 
     cli_vlan_resp = await dut.exos_jrpc.cli("show vlan")
     vlan_data_map = dict()
@@ -76,8 +78,26 @@ async def eos_check_vlans(
             active_ports=vlan_info["activePorts"],
         )
 
+    # -------------------------------------------------------------------------
+    # we will also need to know about LAG (sharing) ports due to the nature
+    # of how EXOS reports the VLAN membership.
+    # -------------------------------------------------------------------------
+
+    cli_port_sharing_resp = await dut.exos_jrpc.cli("show port sharing")
+    ls_port_map = defaultdict(set)
+    for rec in cli_port_sharing_resp:
+
+        if not (port_info := rec.get('ls_ports_show')):
+            continue
+
+        ls_master = port_info['loadShareMaster']
+        ls_port = port_info['port']
+        ls_port_map[ls_master].add(ls_port)
+
+    # -------------------------------------------------------------------------
     # keep track of the set of expectd VLAN-IDs (ints) should we need them for
     # the exclusivity check.
+    # -------------------------------------------------------------------------
 
     expd_vlan_ids = set()
 
@@ -100,6 +120,7 @@ async def eos_check_vlans(
             dut,
             exclusive=vlan_checks.exclusive,
             vlan_status=vlan_status,
+            ls_port_map=ls_port_map,
             result=result,
             results=results,
         )
@@ -147,6 +168,7 @@ async def _check_one_vlan(
     exclusive: bool,
     result: VlanCheckResult,
     vlan_status: dict,
+    ls_port_map: dict[str, set],
     results: CheckResultsCollection,
 ):
     """
@@ -173,6 +195,43 @@ async def _check_one_vlan(
     msrd.interfaces = ports
     msrd_ifs_set = set(msrd.interfaces)
     expd_ifs_set = set(check.expected_results.interfaces)
+
+    # -------------------------------------------------------------------------
+    # if an expected interface is an SVI, then discard that since EXOS does
+    # not report the SVI in the VLAN membership.
+    # -------------------------------------------------------------------------
+
+    if virt_if_names := [
+        if_name
+        for if_name, if_info in dut.device_info['interfaces'].items()
+        if if_info['profile_flags'].get('is_virtual', False)
+    ]:
+        expd_ifs_set -= set(virt_if_names)
+
+    # -------------------------------------------------------------------------
+    # if an expected interface is a lag, then we need to find the lag members
+    # so that we can expect each of the individual members to be in the
+    # measured interfaces.
+    # -------------------------------------------------------------------------
+
+    if lag_if_names := [
+        if_name
+        for if_name, if_info in dut.device_info['interfaces'].items()
+        if if_info['profile_flags'].get('is_lag', False)
+    ]:
+        # remove the lag interface names from the set of expected interfaces
+        expd_ifs_set -= set(lag_if_names)
+
+        for lag_member_name in chain([
+            lag_intf.name
+            for lag_if_name in lag_if_names
+            for lag_intf in dut.device.interfaces[lag_if_name].profile.if_lag_members
+        ]):
+            if lag_member_name in ls_port_map:
+                expd_ifs_set -= ls_port_map[lag_member_name]
+                expd_ifs_set.add(lag_member_name)
+
+    # -------------------------------------------------------------------------
 
     if exclusive:
         if missing_interfaces := expd_ifs_set - msrd_ifs_set:
@@ -204,8 +263,10 @@ async def _check_one_vlan(
             if exclusive:
                 # use the sets for comparison purposes to avoid mismatch
                 # due to list order.
+
                 if msrd_ifs_set == expd_ifs_set:
                     return CheckStatus.PASS
+
             else:
                 # if the set of measured interfaces are in the set of expected, and
                 # this check is non-exclusive, then pass it.

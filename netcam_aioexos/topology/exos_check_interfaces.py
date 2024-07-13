@@ -334,6 +334,7 @@ async def _check_one_lag_interface(
     result = InterfaceCheckResult(device=device, check=check)
     lacp_cfg = cli_rsp[0]["lacpLagCfg"]
     msrd = result.measurement
+    msrd.desc = check.expected_results.desc         # don't care about the description
     msrd.oper_up = lacp_cfg["up"] == 1
     msrd.used = lacp_cfg["enable"] == 1
     results.append(result.measure())
@@ -351,6 +352,9 @@ async def _check_mgmt_interface(
     mgmt_data = cli_rsp[0]["vlanProc"]
     msrd = result.measurement
     msrd.oper_up = mgmt_data["linkState"] == 1
-    msrd.used = mgmt_data["adminState"] == 1
+    msrd.used = (
+        (mgmt_data["adminState"] == 1) and
+        (mgmt_data["ipAddress"] != "0.0.0.0")
+    )
     results.append(result.measure())
     return
