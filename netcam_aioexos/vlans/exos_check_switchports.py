@@ -84,7 +84,7 @@ async def exos_check_switchports(
         if not (port_info := rec.get("show_ports_info_detail_vlans")):
             continue
 
-        port_id = port_info["port"]
+        port_id = str(port_info["port"])
         vlan_id = port_info["vlanId"]
         if port_info["tagStatus"] == 1:
             msrd_switchports[port_id]["tagged"].append(vlan_id)

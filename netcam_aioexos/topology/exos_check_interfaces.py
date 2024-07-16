@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
-import asyncio
+
 # -----------------------------------------------------------------------------
 # System Imports
 # -----------------------------------------------------------------------------
@@ -88,11 +88,17 @@ async def exos_check_interfaces(
     cli_sh_ports_info = await dut.exos_jrpc.cli("show ports information")
     cli_sh_ports = await dut.exos_jrpc.cli("show ports")
 
-    ports_info_found = set(str(if_data['port']) for rec in cli_sh_ports_info
-                           if (if_data := rec.get("show_ports_info")))
+    ports_info_found = set(
+        str(if_data["port"])
+        for rec in cli_sh_ports_info
+        if (if_data := rec.get("show_ports_info"))
+    )
 
-    ports_data_found = set(str(if_data['port']) for rec in cli_sh_ports
-                            if (if_data := rec.get("show_ports_info_detail")))
+    ports_data_found = set(
+        str(if_data["port"])
+        for rec in cli_sh_ports
+        if (if_data := rec.get("show_ports_info_detail"))
+    )
 
     if missing_interfaces := ports_info_found - ports_data_found:
         for if_name in missing_interfaces:
@@ -177,7 +183,6 @@ async def exos_check_interfaces(
             results=results,
         )
 
-
     return results
 
 
@@ -198,6 +203,7 @@ def _check_exclusive_interfaces_list(
     This check validates the exclusive list of interfaces found on the device
     against the expected list in the design.
     """
+
     def sort_key(i):
         return DeviceInterface(i, interfaces=device.interfaces)
 
@@ -334,12 +340,13 @@ async def _check_one_lag_interface(
     result = InterfaceCheckResult(device=device, check=check)
     lacp_cfg = cli_rsp[0]["lacpLagCfg"]
     msrd = result.measurement
-    msrd.desc = check.expected_results.desc         # don't care about the description
+    msrd.desc = check.expected_results.desc  # don't care about the description
     msrd.oper_up = lacp_cfg["up"] == 1
     msrd.used = lacp_cfg["enable"] == 1
     results.append(result.measure())
 
     return
+
 
 async def _check_mgmt_interface(
     dut: EXOSDeviceUnderTest,
@@ -347,14 +354,11 @@ async def _check_mgmt_interface(
     check: InterfaceCheck,
     results: CheckResultsCollection,
 ):
-    cli_rsp = await dut.exos_jrpc.cli(f"show mgmt")
+    cli_rsp = await dut.exos_jrpc.cli("show mgmt")
     result = InterfaceCheckResult(device=device, check=check)
     mgmt_data = cli_rsp[0]["vlanProc"]
     msrd = result.measurement
     msrd.oper_up = mgmt_data["linkState"] == 1
-    msrd.used = (
-        (mgmt_data["adminState"] == 1) and
-        (mgmt_data["ipAddress"] != "0.0.0.0")
-    )
+    msrd.used = (mgmt_data["adminState"] == 1) and (mgmt_data["ipAddress"] != "0.0.0.0")
     results.append(result.measure())
     return

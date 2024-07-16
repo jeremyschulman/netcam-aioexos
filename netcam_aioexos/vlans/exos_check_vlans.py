@@ -86,12 +86,11 @@ async def eos_check_vlans(
     cli_port_sharing_resp = await dut.exos_jrpc.cli("show port sharing")
     ls_port_map = defaultdict(set)
     for rec in cli_port_sharing_resp:
-
-        if not (port_info := rec.get('ls_ports_show')):
+        if not (port_info := rec.get("ls_ports_show")):
             continue
 
-        ls_master = port_info['loadShareMaster']
-        ls_port = port_info['port']
+        ls_master = str(port_info["loadShareMaster"])
+        ls_port = str(port_info["port"])
         ls_port_map[ls_master].add(ls_port)
 
     # -------------------------------------------------------------------------
@@ -203,8 +202,8 @@ async def _check_one_vlan(
 
     if virt_if_names := [
         if_name
-        for if_name, if_info in dut.device_info['interfaces'].items()
-        if if_info['profile_flags'].get('is_virtual', False)
+        for if_name, if_info in dut.device_info["interfaces"].items()
+        if if_info["profile_flags"].get("is_virtual", False)
     ]:
         expd_ifs_set -= set(virt_if_names)
 
@@ -216,17 +215,21 @@ async def _check_one_vlan(
 
     if lag_if_names := [
         if_name
-        for if_name, if_info in dut.device_info['interfaces'].items()
-        if if_info['profile_flags'].get('is_lag', False)
+        for if_name, if_info in dut.device_info["interfaces"].items()
+        if if_info["profile_flags"].get("is_lag", False)
     ]:
         # remove the lag interface names from the set of expected interfaces
         expd_ifs_set -= set(lag_if_names)
 
-        for lag_member_name in chain([
-            lag_intf.name
-            for lag_if_name in lag_if_names
-            for lag_intf in dut.device.interfaces[lag_if_name].profile.if_lag_members
-        ]):
+        for lag_member_name in chain(
+            [
+                lag_intf.name
+                for lag_if_name in lag_if_names
+                for lag_intf in dut.device.interfaces[
+                    lag_if_name
+                ].profile.if_lag_members
+            ]
+        ):
             if lag_member_name in ls_port_map:
                 expd_ifs_set -= ls_port_map[lag_member_name]
                 expd_ifs_set.add(lag_member_name)
