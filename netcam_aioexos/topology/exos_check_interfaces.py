@@ -32,6 +32,7 @@ from netcad.feats.topology.checks.check_interfaces import (
     InterfaceCheck,
     InterfaceCheckResult,
     InterfaceCheckMeasurement,
+    InterfaceCheckNotUsedExpectations,
 )
 
 # -----------------------------------------------------------------------------
@@ -232,7 +233,7 @@ class EXosInterfaceMeasurement(InterfaceCheckMeasurement):
         )
 
         return cls(
-            # a port is used if admin enabled or there is a description
+            # a port is used if admin enabled
             used=if_data["adminState"] == 1,
             # a port is Up if the linkState is 1 or there is an IP address (SVI)
             oper_up=if_data["linkState"] == 1 or if_data.get("ipStatus", 0),
@@ -267,6 +268,15 @@ def _check_one_interface(
     # table as we learn more.
 
     measurement = EXosInterfaceMeasurement.from_cli(if_msrd)
+
+    # if the interface is expcted to be used, and admin is down (used=False) and the
+    # interface is expected to be down then used is actually true.
+
+    if (not isinstance(check.expected_results, InterfaceCheckNotUsedExpectations)) and (
+        check.expected_results.oper_up is not None
+    ):
+        measurement.used = not (measurement.used ^ check.expected_results.oper_up)
+
     match measurement.speed:
         case 1:
             measurement.speed = 10
