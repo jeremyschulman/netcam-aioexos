@@ -77,8 +77,9 @@ async def exos_test_ipaddrs(
     msrd_mgmt_data = cli_mgmt_rsp[0]["vlanProc"]
 
     dev_ipcfgs = [
-        cfg for rec in cli_ipcfg_rsp
-        if (cfg := rec.get("ifIpConfig")) and cfg['ipAddress'] != '0.0.0.0'
+        cfg
+        for rec in cli_ipcfg_rsp
+        if (cfg := rec.get("ifIpConfig")) and cfg["ipAddress"] != "0.0.0.0"
     ]
 
     dev_vlan_ifcfgs = {
@@ -132,7 +133,7 @@ async def exos_test_ipaddrs(
     # against zero.
 
     msrd_if_name = list(dev_vlan_ifcfgs)
-    if msrd_mgmt_data.get("ipAddress") != '0.0.0.0':
+    if msrd_mgmt_data.get("ipAddress") != "0.0.0.0":
         msrd_if_name.append("Mgmt")
 
     if collection.exclusive:

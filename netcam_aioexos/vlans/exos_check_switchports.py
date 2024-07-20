@@ -16,8 +16,11 @@
 # System Imports
 # -----------------------------------------------------------------------------
 
+import asyncio
 from typing import cast
 from collections import defaultdict
+from itertools import chain
+
 # -----------------------------------------------------------------------------
 # Public Imports
 # -----------------------------------------------------------------------------
@@ -78,13 +81,27 @@ async def exos_check_switchports(
 
     msrd_switchports = defaultdict(lambda: {"untagged": None, "tagged": list()})
 
-    cli_rsp = await dut.exos_jrpc.cli("show ports vlan port-number")
+    # There seems to be a bug when collecting data from a large VPEX switch.
+    # Some of the data of later slots are omitted.  Therefore, going to "hop"
+    # through gathering the ports information first to get a list of the port
+    # lists.  Then from that list going to gather the VLAN information for each
+    # port list.  Ugh.
 
-    for rec in cli_rsp:
+    cli_rsp = await dut.exos_jrpc.cli("show ports information")
+    port_lists = cli_rsp[0]["show_ports_info"]["portList"].split(",")
+
+    resp = await asyncio.gather(
+        *(
+            dut.exos_jrpc.cli(f"show ports {port_list} vlan port-number")
+            for port_list in port_lists
+        )
+    )
+
+    for rec in chain.from_iterable(resp):
         if not (port_info := rec.get("show_ports_info_detail_vlans")):
             continue
 
-        port_id = port_info["port"]
+        port_id = str(port_info["port"])
         vlan_id = port_info["vlanId"]
         if port_info["tagStatus"] == 1:
             msrd_switchports[port_id]["tagged"].append(vlan_id)
@@ -166,7 +183,7 @@ def _check_access_switchport(
     This function validates that the access port is reporting as expected.
     This primary check here is ensuring the access VLAN-ID matches.
     """
-    msrd = result.measurement = SwitchportCheckResult.MeasuredAccess()
+    msrd = result.measurement = SwitchportCheckResult.MeasuredAccess()  # noqa
     msrd.switchport_mode = "access"
 
     # the check stores the VlanProfile, and we need to mutate this value to the
@@ -188,7 +205,7 @@ def _check_trunk_switchport(
     """
 
     expd = cast(SwitchportCheck.ExpectTrunk, result.check.expected_results)
-    msrd = result.measurement = SwitchportCheckResult.MeasuredTrunk()
+    msrd = result.measurement = SwitchportCheckResult.MeasuredTrunk()  # noqa
     msrd.switchport_mode = "trunk"
     msrd.native_vlan = msrd_status["untagged"]
 

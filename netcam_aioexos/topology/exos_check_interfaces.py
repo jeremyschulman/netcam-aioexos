@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
-import asyncio
+
 # -----------------------------------------------------------------------------
 # System Imports
 # -----------------------------------------------------------------------------
@@ -32,6 +32,7 @@ from netcad.feats.topology.checks.check_interfaces import (
     InterfaceCheck,
     InterfaceCheckResult,
     InterfaceCheckMeasurement,
+    InterfaceCheckNotUsedExpectations,
 )
 
 # -----------------------------------------------------------------------------
@@ -88,11 +89,17 @@ async def exos_check_interfaces(
     cli_sh_ports_info = await dut.exos_jrpc.cli("show ports information")
     cli_sh_ports = await dut.exos_jrpc.cli("show ports")
 
-    ports_info_found = set(str(if_data['port']) for rec in cli_sh_ports_info
-                           if (if_data := rec.get("show_ports_info")))
+    ports_info_found = set(
+        str(if_data["port"])
+        for rec in cli_sh_ports_info
+        if (if_data := rec.get("show_ports_info"))
+    )
 
-    ports_data_found = set(str(if_data['port']) for rec in cli_sh_ports
-                            if (if_data := rec.get("show_ports_info_detail")))
+    ports_data_found = set(
+        str(if_data["port"])
+        for rec in cli_sh_ports
+        if (if_data := rec.get("show_ports_info_detail"))
+    )
 
     if missing_interfaces := ports_info_found - ports_data_found:
         for if_name in missing_interfaces:
@@ -177,7 +184,6 @@ async def exos_check_interfaces(
             results=results,
         )
 
-
     return results
 
 
@@ -226,7 +232,7 @@ class EXosInterfaceMeasurement(InterfaceCheckMeasurement):
         )
 
         return cls(
-            # a port is used if admin enabled or there is a description
+            # a port is used if admin enabled
             used=if_data["adminState"] == 1,
             # a port is Up if the linkState is 1 or there is an IP address (SVI)
             oper_up=if_data["linkState"] == 1 or if_data.get("ipStatus", 0),
@@ -261,6 +267,18 @@ def _check_one_interface(
     # table as we learn more.
 
     measurement = EXosInterfaceMeasurement.from_cli(if_msrd)
+
+    # if the interface is expcted to be used, and admin is down (used=False)
+    # and the interface is expected to be down then used is actually true.  The
+    # netcam report will show expected used = True, measured used = False when
+    # there is a mismatch.  For example when a port is enabled when it should
+    # be disabled.
+
+    if (not isinstance(check.expected_results, InterfaceCheckNotUsedExpectations)) and (
+        check.expected_results.oper_up is not None  # None is a don't care condition.
+    ):
+        measurement.used = not (measurement.used ^ check.expected_results.oper_up)
+
     match measurement.speed:
         case 1:
             measurement.speed = 10
@@ -334,6 +352,7 @@ async def _check_one_lag_interface(
     result = InterfaceCheckResult(device=device, check=check)
     lacp_cfg = cli_rsp[0]["lacpLagCfg"]
     msrd = result.measurement
+    msrd.desc = check.expected_results.desc  # don't care about the description
     msrd.oper_up = lacp_cfg["up"] == 1
     msrd.used = lacp_cfg["enable"] == 1
     results.append(result.measure())
@@ -346,11 +365,11 @@ async def _check_mgmt_interface(
     check: InterfaceCheck,
     results: CheckResultsCollection,
 ):
-    cli_rsp = await dut.exos_jrpc.cli(f"show mgmt")
+    cli_rsp = await dut.exos_jrpc.cli("show mgmt")
     result = InterfaceCheckResult(device=device, check=check)
     mgmt_data = cli_rsp[0]["vlanProc"]
     msrd = result.measurement
     msrd.oper_up = mgmt_data["linkState"] == 1
-    msrd.used = mgmt_data["adminState"] == 1
+    msrd.used = (mgmt_data["adminState"] == 1) and (mgmt_data["ipAddress"] != "0.0.0.0")
     results.append(result.measure())
     return
