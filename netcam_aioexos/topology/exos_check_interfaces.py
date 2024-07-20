@@ -204,7 +204,6 @@ def _check_exclusive_interfaces_list(
     This check validates the exclusive list of interfaces found on the device
     against the expected list in the design.
     """
-
     def sort_key(i):
         return DeviceInterface(i, interfaces=device.interfaces)
 
@@ -359,7 +358,6 @@ async def _check_one_lag_interface(
     results.append(result.measure())
 
     return
-
 
 async def _check_mgmt_interface(
     dut: EXOSDeviceUnderTest,

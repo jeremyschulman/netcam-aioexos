@@ -83,7 +83,8 @@ async def exos_test_ipaddrs(
     ]
 
     dev_vlan_ifcfgs = {
-        vlan_name: cfg for cfg in dev_ipcfgs if (vlan_name := cfg.get("vlan"))
+        vlan_name: cfg for cfg in dev_ipcfgs
+        if (vlan_name := cfg.get("vlan"))
     }
 
     results = list()
