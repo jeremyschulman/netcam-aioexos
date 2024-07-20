@@ -269,11 +269,14 @@ def _check_one_interface(
 
     measurement = EXosInterfaceMeasurement.from_cli(if_msrd)
 
-    # if the interface is expcted to be used, and admin is down (used=False) and the
-    # interface is expected to be down then used is actually true.
+    # if the interface is expcted to be used, and admin is down (used=False)
+    # and the interface is expected to be down then used is actually true.  The
+    # netcam report will show expected used = True, measured used = False when
+    # there is a mismatch.  For example when a port is enabled when it should
+    # be disabled.
 
     if (not isinstance(check.expected_results, InterfaceCheckNotUsedExpectations)) and (
-        check.expected_results.oper_up is not None
+        check.expected_results.oper_up is not None  # None is a don't care condition.
     ):
         measurement.used = not (measurement.used ^ check.expected_results.oper_up)
 
